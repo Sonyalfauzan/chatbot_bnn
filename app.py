@@ -4,10 +4,11 @@ from datetime import datetime
 from typing import Dict, List, Tuple
 import re
 import logging
+import google.generativeai as genai
 
 # --- SETUP DASAR ---
 st.set_page_config(
-    page_title="BANTU - Chatbot Edukasi Anti-Narkoba (Versi Baru)",
+    page_title="BANTU - Chatbot Anti-Narkoba (Integrasi Gemini)",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -17,87 +18,28 @@ st.set_page_config(
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# --- CUSTOM CSS (Tetap seperti sebelumnya) ---
+# --- CUSTOM CSS ---
 def load_css():
     st.markdown("""
         <style>
-        .main {
-            background-color: #f8f9fa;
-        }
-        .stApp {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        .chat-message {
-            padding: 1.5rem;
-            border-radius: 0.5rem;
-            margin-bottom: 1rem;
-            display: flex;
-            flex-direction: column;
-        }
-        .user-message {
-            background-color: #e3f2fd;
-            border-left: 4px solid #2196f3;
-        }
-        .bot-message {
-            background-color: #ffffff;
-            border-left: 4px solid #4caf50;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .warning-message {
-            background-color: #fff3cd;
-            border-left: 4px solid #ff9800;
-            padding: 1rem;
-            border-radius: 0.5rem;
-            margin: 1rem 0;
-        }
-        .header-banner {
-            background: linear-gradient(135deg, #1976d2 0%, #0d47a1 100%);
-            color: white;
-            padding: 2rem;
-            border-radius: 0.5rem;
-            margin-bottom: 2rem;
-            text-align: center;
-        }
-        .stats-card {
-            background: white;
-            padding: 1.5rem;
-            border-radius: 0.5rem;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            margin: 1rem 0;
-        }
-        .intent-badge {
-            display: inline-block;
-            padding: 0.25rem 0.75rem;
-            border-radius: 1rem;
-            font-size: 0.85rem;
-            font-weight: 600;
-            margin-top: 0.5rem;
-        }
-        .intent-education {
-            background-color: #e3f2fd;
-            color: #1976d2;
-        }
-        .intent-prevention {
-            background-color: #f3e5f5;
-            color: #7b1fa2;
-        }
-        .intent-support {
-            background-color: #e8f5e9;
-            color: #388e3c;
-        }
-        .intent-forbidden {
-            background-color: #ffebee;
-            color: #c62828;
-        }
+        .main { background-color: #f8f9fa; }
+        .stApp { max-width: 1200px; margin: 0 auto; }
+        .chat-message { padding: 1.5rem; border-radius: 0.5rem; margin-bottom: 1rem; display: flex; flex-direction: column; }
+        .user-message { background-color: #e3f2fd; border-left: 4px solid #2196f3; }
+        .bot-message { background-color: #ffffff; border-left: 4px solid #4caf50; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .warning-message { background-color: #fff3cd; border-left: 4px solid #ff9800; padding: 1rem; border-radius: 0.5rem; margin: 1rem 0; }
+        .header-banner { background: linear-gradient(135deg, #1976d2 0%, #0d47a1 100%); color: white; padding: 2rem; border-radius: 0.5rem; margin-bottom: 2rem; text-align: center; }
+        .stats-card { background: white; padding: 1.5rem; border-radius: 0.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin: 1rem 0; }
+        .intent-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 1rem; font-size: 0.85rem; font-weight: 600; margin-top: 0.5rem; }
+        .intent-education { background-color: #e3f2fd; color: #1976d2; }
+        .intent-prevention { background-color: #f3e5f5; color: #7b1fa2; }
+        .intent-support { background-color: #e8f5e9; color: #388e3c; }
+        .intent-forbidden { background-color: #ffebee; color: #c62828; }
         </style>
     """, unsafe_allow_html=True)
 
-# --- CLASS KNOWLEDGE BASE ---
+# --- CLASS KNOWLEDGE BASE (Tetap seperti sebelumnya) ---
 class KnowledgeBase:
-    """
-    Kelas untuk menyimpan dan mencari informasi edukasi.
-    """
     def __init__(self):
         self.content = {
             "bahaya_narkoba": {
@@ -278,14 +220,10 @@ class KnowledgeBase:
         ]
 
     def classify_intent(self, query: str) -> str:
-        """Mengklasifikasikan intent pertanyaan."""
         query_lower = query.lower()
-        # Cek forbidden patterns terlebih dahulu
         for pattern in self.forbidden_patterns:
             if re.search(pattern, query_lower):
                 return "forbidden"
-
-        # Klasifikasi intent berdasarkan pola
         intent_patterns = {
             "education": [r"(bahaya|dampak|efek|akibat)", r"(jenis|macam|tipe|golongan)", r"(pengertian|definisi|apa itu)", r"(informasi|info|penjelasan)"],
             "prevention": [r"(menolak|nolak|hindari|cegah)", r"(ajakan|tawaran|tekanan)", r"(strategi|cara|tips)\s+(menolak|nolak)"],
@@ -304,12 +242,10 @@ class KnowledgeBase:
         return "general"
 
     def search_content(self, query: str) -> Tuple[Dict, str]:
-        """Mencari konten yang paling relevan berdasarkan query."""
         query_lower = query.lower()
         intent = self.classify_intent(query)
         if intent == "forbidden":
             return None, intent
-
         best_match = None
         best_score = 0
         for key, content in self.content.items():
@@ -317,96 +253,110 @@ class KnowledgeBase:
             if score > best_score:
                 best_score = score
                 best_match = key
-
         if best_match and best_score > 0:
             return self.content[best_match], best_match
         return None, "general"
 
-# --- CLASS RESPONSE GENERATOR ---
-class ResponseGenerator:
+# --- CLASS LLM INTEGRATION (Menggunakan Gemini) ---
+class LLMInterface:
     """
-    Kelas untuk menghasilkan respons dinamis berdasarkan konten dan mode pengguna.
+    Kelas untuk berinteraksi dengan Google Gemini API.
     """
-    def __init__(self, knowledge_base: KnowledgeBase):
+    def __init__(self, knowledge_base: KnowledgeBase, api_key: str):
         self.kb = knowledge_base
-        self.mode_specifics = {
-            "Remaja": {
-                "greeting": "Hai Remaja! 😊 Aku BANTU. Aku di sini untuk bantu kamu belajar tentang bahaya narkoba dan cara menjaga diri dari bahaya itu. Apa yang ingin kamu tahu hari ini?",
-                "focus": "Pencegahan, penolakan, dampak pada masa depan, dan lingkungan sebaya.",
-                "style": "Santai, mudah dimengerti, dan relevan dengan kehidupan remaja.",
-                "support_contact": "Jika kamu atau temanmu butuh bantuan, jangan ragu hubungi Hotline BNN 184. Mereka siap membantu 24/7 secara rahasia."
-            },
-            "Orang Tua": {
-                "greeting": "Selamat datang, Bapak/Ibu. 👨‍👩‍👧 Aku BANTU. Aku bisa bantu Anda memahami tanda-tanda penyalahgunaan narkoba pada anak dan cara mendukung mereka. Apa yang bisa aku bantu?",
-                "focus": "Mengenali tanda-tanda, strategi komunikasi dengan anak, dan langkah-langkah mendukung pemulihan.",
-                "style": "Empatik, informatif, dan memberikan panduan praktis.",
-                "support_contact": "Keluarga juga bisa menjadi tempat aman. Konsultasikan dengan konselor atau hubungi BNN 184 untuk panduan lebih lanjut."
-            },
-            "Pendidik": {
-                "greeting": "Halo, Guru atau Pendidik. 👨‍🏫 Aku BANTU. Aku bisa bantu Anda dalam memberikan edukasi anti-narkoba kepada peserta didik. Apa yang ingin Anda bahas?",
-                "focus": "Materi edukasi, strategi pencegahan di lingkungan sekolah, dan identifikasi dini.",
-                "style": "Profesional, berbasis bukti, dan mendukung peran pendidik.",
-                "support_contact": "Kolaborasi antara sekolah dan lembaga seperti BNN sangat penting dalam pencegahan."
-            },
-            "Umum": {
-                "greeting": "Halo! 👋 Aku BANTU, chatbot edukasi anti-narkoba dari BNN. Aku siap memberikan informasi yang kamu butuhkan.",
-                "focus": "Informasi umum tentang narkoba, hukum, dan bantuan.",
-                "style": "Netral dan informatif.",
-                "support_contact": "Untuk informasi lebih lanjut atau bantuan, hubungi Hotline BNN 184."
-            }
-        }
+        genai.configure(api_key=api_key)
+        # Pilih model Gemini (gemini-1.5-flash adalah pilihan gratis/ekonomis yang baik)
+        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        logger.info("LLM Interface (Gemini) initialized.")
 
-    def generate_response(self, query: str, mode: str) -> Tuple[str, str, str]:
-        """Menghasilkan respons utama berdasarkan query dan mode."""
-        content, topic = self.kb.search_content(query)
+    def generate_response(self, query: str, mode: str, context_content: Dict) -> str:
+        """
+        Fungsi utama untuk menghasilkan respons dari Gemini.
+        """
         intent = self.kb.classify_intent(query)
-
         if intent == "forbidden":
-            return self._generate_forbidden_response(), "forbidden", intent
+            return self._get_forbidden_response()
 
-        if topic == "general":
-            # Respons umum disesuaikan dengan mode
-            specifics = self.mode_specifics.get(mode, self.mode_specifics["Umum"])
-            greeting = specifics["greeting"]
-            support = specifics["support_contact"]
-            response = f"{greeting}\n\n{self._get_general_info(intent)}\n\n{support}"
-            return response, "general", intent
+        # Format konteks dari KnowledgeBase
+        formatted_context = self._format_context(context_content)
+        if not formatted_context:
+            # Jika tidak ada konteks spesifik, gunakan respons umum dari KB
+            fallback_content, _ = self.kb.search_content(query)
+            formatted_context = self._format_context(fallback_content) if fallback_content else "Saya adalah chatbot edukasi anti-narkoba. Tanyakan apa pun tentang bahaya, pencegahan, atau bantuan terkait narkoba."
 
-        if content:
-            # Gunakan template dan sesuaikan dengan mode
-            specifics = self.mode_specifics.get(mode, self.mode_specifics["Umum"])
-            style = specifics["style"]
-            focus = specifics["focus"]
+        # Buat prompt untuk Gemini
+        prompt = self._build_prompt(query, mode, formatted_context)
 
-            # Template sederhana, bisa dikembangkan lebih kompleks
-            title = content["title"]
-            raw_content = content["content"]
+        try:
+            # Generate content using the model
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    max_output_tokens=1000, # Sesuaikan jika perlu
+                    temperature=0.7,        # Sesuaikan jika perlu
+                )
+            )
+            # Extract the text from the response
+            generated_text = response.text
+            if not generated_text or generated_text.isspace():
+                 logger.warning("Gemini returned an empty response. Falling back to default message.")
+                 return "Maaf, saya tidak bisa menghasilkan jawaban yang relevan saat ini. Silakan coba tanyakan dalam cara yang berbeda."
+            return generated_text.strip()
 
-            # Format konten berdasarkan struktur di KnowledgeBase
-            formatted_content = self._format_content(raw_content)
+        except Exception as e:
+            logger.error(f"Error calling Gemini API: {e}")
+            # Return a safe fallback message
+            return "Maaf, terjadi kesalahan saat menghubungi layanan AI. Silakan coba lagi nanti."
 
-            response = f"**{title}**\n\n{formatted_content}\n\n*Catatan: Informasi ini disajikan sesuai dengan pendekatan untuk {mode} ({style}). Fokus utama: {focus}.*"
-            return response, topic, intent
+    def _build_prompt(self, query: str, mode: str, context: str) -> str:
+        """
+        Membangun prompt yang akan dikirim ke Gemini.
+        Prompt ini memberi instruksi jelas tentang mode pengguna dan konteks.
+        """
+        prompt_template = f"""
+        Kamu adalah BANTU, sebuah chatbot edukasi anti-narkoba milik BNN (Badan Narkotika Nasional) Republik Indonesia.
+        Tugas kamu adalah memberikan informasi edukatif, pencegahan, dan dukungan terkait narkoba.
+        Gaya bahasa dan fokus informasi kamu HARUS disesuaikan dengan 'Mode Pengguna' yang diberikan.
+        Mode Pengguna: {mode}
+        - Jika Mode Pengguna adalah 'Remaja', berikan informasi yang mudah dipahami, relevan dengan kehidupan sehari-hari remaja, dan berikan dorongan positif. Fokus pada pencegahan dan dampak jangka panjang.
+        - Jika Mode Pengguna adalah 'Orang Tua', berikan informasi yang empatik, informatif, dan memberikan panduan praktis untuk mendukung anak. Fokus pada tanda-tanda dan langkah-langkah mendukung.
+        - Jika Mode Pengguna adalah 'Pendidik', berikan informasi yang profesional, berbasis bukti, dan mendukung peran pendidik dalam pencegahan. Fokus pada strategi edukasi dan identifikasi dini.
+        - Jika Mode Pengguna adalah 'Umum', berikan informasi netral dan informatif.
+        Berikut adalah konteks informasi yang relevan dari Knowledge Base:
+        <konteks>
+        {context}
+        </konteks>
+        Pertanyaan dari pengguna:
+        "{query}"
+        Jawablah pertanyaan pengguna secara lengkap dan jelas, sesuai dengan Mode Pengguna dan konteks yang diberikan. Gunakan bahasa yang sopan dan empatik. Jika pertanyaan bersifat terlarang (seperti cara menggunakan, mendapatkan, atau menghindari deteksi narkoba), tolak dengan tegas dan arahkan ke informasi bantuan.
+        """
+        return prompt_template.strip()
 
-        # Fallback
-        return self._get_general_info(intent), "general", intent
-
-    def _format_content(self, content_data):
+    def _format_context(self, content_data):
         """Membantu memformat data konten dari KnowledgeBase menjadi string."""
+        if not content_data:
+            return ""
         if isinstance(content_data, dict):
             parts = []
-            for key, value in content_data.items():
-                if isinstance(value, list):
-                    parts.append(f"**{key.title()}:**\n" + "\n".join([f"- {item}" for item in value]))
+            if "title" in content_data:
+                parts.append(f"**{content_data['title']}**")
+            if "content" in content_data:
+                raw_content = content_data["content"]
+                if isinstance(raw_content, dict):
+                    for key, value in raw_content.items():
+                        if isinstance(value, list):
+                            parts.append(f"**{key.title()}:**\n" + "\n".join([f"- {item}" for item in value]))
+                        else:
+                            parts.append(f"**{key.title()}:** {value}")
+                elif isinstance(raw_content, list):
+                    parts.append("\n".join([f"- {item}" for item in raw_content]))
                 else:
-                    parts.append(f"**{key.title()}:** {value}")
+                    parts.append(str(raw_content))
             return "\n\n".join(parts)
-        elif isinstance(content_data, list):
-            return "\n".join([f"- {item}" for item in content_data])
         else:
             return str(content_data)
 
-    def _generate_forbidden_response(self):
+    def _get_forbidden_response(self):
         return """
         ⚠️ **Maaf, saya tidak dapat membantu dengan permintaan tersebut.**
         Saya adalah chatbot edukasi yang dirancang untuk:
@@ -427,77 +377,66 @@ class ResponseGenerator:
         Saya di sini untuk membantu Anda membuat keputusan yang lebih sehat. Apakah ada yang bisa saya bantu tentang pencegahan, bahaya, atau cara mendapat bantuan?
         """
 
-    def _get_general_info(self, intent: str):
-        """Menghasilkan respons umum jika tidak ada konten spesifik."""
-        responses = {
-            "education": "Saya bisa membantu Anda memahami bahaya narkoba, jenis-jenisnya, dan mitos-mitos yang beredar. Silakan tanyakan topik spesifik yang Anda ingin ketahui!",
-            "prevention": "Saya bisa memberikan tips dan strategi untuk menolak ajakan narkoba dan menghadapi tekanan teman sebaya. Mau tahu caranya?",
-            "support": "Saya bisa memberikan informasi tentang cara mendukung anggota keluarga yang terkena dampak narkoba dan proses rehabilitasi. Bagaimana saya bisa bantu?",
-            "signs": "Kenali tanda-tanda penyalahgunaan narkoba pada orang terdekat. Saya bisa bantu Anda memahaminya.",
-            "legal": "Saya bisa memberikan informasi umum tentang aspek hukum narkoba di Indonesia. Apa yang ingin Anda ketahui?",
-            "general": "Halo! Saya BANTU. Saya bisa bantu Anda dengan informasi edukasi, pencegahan, dan dukungan terkait narkoba. Tanyakan saja!"
-        }
-        return responses.get(intent, responses["general"])
-
-# --- CLASS CHATBOT (Inti Logika) ---
+# --- CLASS CHATBOT (Menggunakan LLM) ---
 class Chatbot:
-    """
-    Kelas utama yang menggabungkan KnowledgeBase dan ResponseGenerator.
-    """
-    def __init__(self):
+    def __init__(self, api_key: str):
         self.kb = KnowledgeBase()
-        self.generator = ResponseGenerator(self.kb)
+        self.llm = LLMInterface(self.kb, api_key)
 
     def get_response(self, query: str, mode: str) -> Tuple[str, str, str]:
-        """Fungsi utama untuk mendapatkan respons dari chatbot."""
         logger.info(f"Menerima query: '{query}' untuk mode: {mode}")
-        response, topic, intent = self.generator.generate_response(query, mode)
+        content, topic = self.kb.search_content(query)
+        intent = self.kb.classify_intent(query)
+        if intent == "forbidden":
+            response = self.llm.generate_response(query, mode, content)
+            logger.info(f"Memberikan respons FORBIDDEN untuk intent: {intent}")
+            return response, "general", intent # Topic bisa general atau tetap forbidden
+
+        response = self.llm.generate_response(query, mode, content)
         logger.info(f"Memberikan respons untuk intent: {intent}, topic: {topic}")
         return response, topic, intent
 
-# --- FUNGSI UNTUK INTEGRASI API (Inti Logika Utama) ---
+# --- FUNGSI UNTUK INTEGRASI API ---
 @st.cache_resource
-def get_chatbot():
-    """Fungsi untuk membuat instance chatbot tunggal dan di-cache."""
-    return Chatbot()
+def get_chatbot(api_key: str):
+    return Chatbot(api_key)
 
-def get_response_for_api(query: str, mode: str = "Umum") -> str:
-    """
-    Fungsi ini adalah inti dari logika chatbot yang bisa digunakan untuk integrasi API.
-    Mode default diatur ke "Umum" jika tidak disediakan.
-    """
-    bot = get_chatbot()
+def get_response_for_api(query: str, mode: str = "Umum", api_key: str = None) -> str:
+    if not api_key:
+        # Jika api_key tidak disediakan, coba ambil dari secrets Streamlit
+        api_key = st.secrets.get("GEMINI_API_KEY")
+        if not api_key:
+            logger.error("Gemini API key tidak ditemukan di parameter atau secrets.")
+            return "Error: API key tidak tersedia."
+    bot = get_chatbot(api_key)
     response, topic, intent = bot.get_response(query, mode)
-    # Untuk integrasi API, Anda mungkin hanya ingin mengembalikan teks respons
-    # atau objek JSON dengan respons, intent, dan topic.
-    # Contoh: return {"response": response, "intent": intent, "topic": topic}
+    # Untuk integrasi API, kembalikan hanya teks respons
     return response
 
 # --- STREAMLIT UI ---
 def main():
     load_css()
-    # Inisialisasi Session State
     if "messages" not in st.session_state:
         st.session_state.messages = []
     if "mode" not in st.session_state:
         st.session_state.mode = "Remaja"
 
-    bot = get_chatbot()
+    # Ambil API key dari secrets Streamlit
+    api_key = st.secrets.get("GEMINI_API_KEY")
+    if not api_key:
+        st.error("❌ **Error: Gemini API key tidak ditemukan!**\n\nSilakan atur `GEMINI_API_KEY` di `.streamlit/secrets.toml` atau pastikan API key valid.")
+        st.stop() # Hentikan eksekusi jika tidak ada API key
 
-    # Header
+    bot = get_chatbot(api_key)
+
     st.markdown("""
         <div class="header-banner">
-            <h1>🛡️ BANTU - Chatbot Edukasi Anti-Narkoba (Versi Baru)</h1>
-            <p style="font-size: 1.1rem; margin-top: 0.5rem;">
-                Badan Narkotika Nasional (BNN) Republik Indonesia
-            </p>
-            <p style="font-size: 0.95rem; opacity: 0.9;">
-                Chatbot Edukasi, Pencegahan, dan Dukungan (v2.0)
-            </p>
+            <h1>🛡️ BANTU - Chatbot Anti-Narkoba (Integrasi Gemini)</h1>
+            <p style="font-size: 1.1rem; margin-top: 0.5rem;">Badan Narkotika Nasional (BNN) Republik Indonesia</p>
+            <p style="font-size: 0.95rem; opacity: 0.9;">Chatbot Edukasi, Pencegahan, dan Dukungan (v4.0 - Gemini)</p>
         </div>
     """, unsafe_allow_html=True)
 
-    # Sidebar
     with st.sidebar:
         st.image("https://via.placeholder.com/150x150.png?text=BNN+Logo", width=150)
         st.markdown("### ⚙️ Pengaturan")
@@ -522,19 +461,21 @@ def main():
             st.session_state.messages = []
             st.rerun()
 
-    # Main Content
     tab1, tab2 = st.tabs(["💬 Chat", "📚 Panduan"])
     with tab1:
-        # Chat Container
         chat_container = st.container()
         with chat_container:
             if len(st.session_state.messages) == 0:
-                # Tampilkan greeting berdasarkan mode awal
-                initial_greeting = bot.generator.mode_specifics[st.session_state.mode]["greeting"]
+                initial_greeting = {
+                    "Remaja": "Hai Remaja! 😊 Aku BANTU. Aku di sini untuk bantu kamu belajar tentang bahaya narkoba dan cara menjaga diri dari bahaya itu. Apa yang ingin kamu tahu hari ini?",
+                    "Orang Tua": "Selamat datang, Bapak/Ibu. 👨‍👩‍👧 Aku BANTU. Aku bisa bantu Anda memahami tanda-tanda penyalahgunaan narkoba pada anak dan cara mendukung mereka. Apa yang bisa aku bantu?",
+                    "Pendidik": "Halo, Guru atau Pendidik. 👨‍🏫 Aku BANTU. Aku bisa bantu Anda dalam memberikan edukasi anti-narkoba kepada peserta didik. Apa yang ingin Anda bahas?",
+                    "Umum": "Halo! 👋 Aku BANTU, chatbot edukasi anti-narkoba dari BNN. Aku siap memberikan informasi yang kamu butuhkan."
+                }
                 st.markdown(f"""
                     <div class="stats-card">
                         <h3>👋 Selamat Datang di BANTU!</h3>
-                        <p>{initial_greeting}</p>
+                        <p>{initial_greeting.get(st.session_state.mode, initial_greeting['Umum'])}</p>
                         <p><strong>Silakan mulai dengan mengetik pertanyaan Anda di bawah!</strong></p>
                     </div>
                 """, unsafe_allow_html=True)
@@ -545,7 +486,6 @@ def main():
                     message.get("intent")
                 )
 
-        # Input Area
         st.markdown("---")
         col1, col2 = st.columns([5, 1])
         with col1:
@@ -557,8 +497,6 @@ def main():
         with col2:
             send_button = st.button("📤 Kirim", use_container_width=True)
 
-        # Quick Questions (Tetap sama)
-        st.markdown("#### 💡 Pertanyaan Cepat")
         quick_questions = [
             "Apa bahaya narkoba bagi kesehatan?",
             "Bagaimana cara menolak ajakan teman?",
@@ -573,17 +511,13 @@ def main():
                     user_input = quick_questions[idx]
                     send_button = True
 
-        # Process Input
         if send_button and user_input:
-            # Add user message
             st.session_state.messages.append({
                 "role": "user",
                 "content": user_input,
                 "timestamp": datetime.now().isoformat()
             })
-            # Get response from Chatbot
             response, topic, intent = bot.get_response(user_input, st.session_state.mode)
-            # Add bot response
             st.session_state.messages.append({
                 "role": "assistant",
                 "content": response,
@@ -591,38 +525,41 @@ def main():
                 "topic": topic,
                 "timestamp": datetime.now().isoformat()
             })
-            # Rerun to update chat
             st.rerun()
 
     with tab2:
         st.markdown("## 📚 Panduan Lengkap")
         st.markdown("""
             <div class="stats-card">
-                <h3>🎯 Cara Menggunakan BANTU (Versi Baru)</h3>
-                <p>Versi baru ini menyesuaikan responsnya berdasarkan <strong>Mode Pengguna</strong> yang dipilih.</p>
+                <h3>🎯 Cara Menggunakan BANTU (Versi Gemini)</h3>
+                <p>Versi ini menggunakan Google Gemini API untuk menghasilkan respons yang lebih alami dan disesuaikan.</p>
                 <ol>
+                    <li><strong>Pastikan API key Gemini</strong> telah disimpan di <code>.streamlit/secrets.toml</code>.</li>
                     <li><strong>Pilih Mode Pengguna</strong> di sidebar (Remaja/Orang Tua/Pendidik/Umum).</li>
                     <li><strong>Ketik pertanyaan Anda</strong> di kolom chat.</li>
-                    <li>Chatbot akan memberikan <strong>informasi dan gaya respons</strong> yang sesuai dengan mode Anda.</li>
+                    <li>Chatbot akan mengirim pertanyaan dan mode Anda ke Gemini, beserta konteks dari KnowledgeBase.</li>
+                    <li>Gemini akan menghasilkan <strong>respons yang dinamis dan disesuaikan</strong> dengan mode Anda.</li>
                     <li>Gunakan <strong>pertanyaan cepat</strong> untuk akses informasi populer.</li>
                 </ol>
             </div>
         """, unsafe_allow_html=True)
         st.markdown("---")
-        st.markdown("### 🔄 Integrasi ke Platform Lain (WA/Tele)")
+        st.markdown("### 🔌 Integrasi ke Platform Lain (WA/Tele)")
         st.markdown("""
             <div class="stats-card">
-                <p>Kode ini dirancang untuk memudahkan integrasi ke platform eksternal seperti WhatsApp atau Telegram.</p>
-                <p>Inti logika chatbot ada di fungsi <code>get_response_for_api(query, mode)</code>.</p>
-                <p>Anda tinggal membuat API server (misalnya dengan FastAPI atau Flask) yang menerima pesan dari platform eksternal, memanggil fungsi ini, dan mengirimkan balik responsnya ke pengguna.</p>
-                <pre><code># Contoh penggunaan fungsi utama
-response = get_response_for_api("Apa itu narkoba?", "Remaja")
-print(response) # Akan mencetak respons yang disesuaikan untuk Remaja
-                </code></pre>
+                <p>Kode ini siap untuk integrasi ke platform eksternal.</p>
+                <p>Inti logika chatbot ada di fungsi <code>get_response_for_api(query, mode, api_key)</code>.</p>
+                <p>Untuk integrasi, buat API server (misalnya dengan FastAPI atau Flask) yang:</p>
+                <ol>
+                    <li>Menerima pesan dari platform (WA/Telegram).</li>
+                    <li>Menentukan <code>mode</code> pengguna (misalnya dari database profil atau perintah).</li>
+                    <li>Memanggil <code>get_response_for_api(pesan, mode, api_key)</code> dengan API key yang valid.</li>
+                    <li>Mengirimkan balik hasilnya ke pengguna.</li>
+                </ol>
+                <p>API key Gemini harus tersedia di server tempat API dijalankan.</p>
             </div>
         """, unsafe_allow_html=True)
 
-# --- FUNGSI RENDER MESSAGE (Tetap Sama) ---
 def render_message(role: str, content: str, intent: str = None):
     if role == "user":
         st.markdown(f"""
