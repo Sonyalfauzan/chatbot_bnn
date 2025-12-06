@@ -708,8 +708,7 @@ def main():
         )
         
         if user_input:
-            process_and_display_response(user_input, components) 
-        with tab2:
+            process_and_display_response(user_input, components) with tab2:
     render_guide_tab(components)
 
 with tab3:
@@ -862,3 +861,4 @@ with col2:
         )
 if name == "main":
 main()
+
